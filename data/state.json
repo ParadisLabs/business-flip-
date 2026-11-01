@@ -2,10 +2,10 @@
  "_about": "Engine-owned memory. Committed back after every run. Never hand-edit except full reset: paste this original skeleton to start clean.",
  "version": 1,
  "tg_offset": 275565130,
- "last_discovery_date": "2026-10-31",
+ "last_discovery_date": "2026-11-01",
  "usage": {
-  "month": "2026-10",
-  "fetched": 120,
+  "month": "2026-11",
+  "fetched": 24,
   "warned": false,
   "blocked": false
  },
@@ -86,6 +86,12 @@
    "w": "macbook-air-m1-miami",
    "p": 350.0,
    "t": 1793439188,
+   "card": false
+  },
+  "2368691843980657": {
+   "w": "playstation-5-miami",
+   "p": 450.0,
+   "t": 1793493513,
    "card": false
   }
  },
