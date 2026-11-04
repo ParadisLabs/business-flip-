@@ -2,10 +2,10 @@
  "_about": "Engine-owned memory. Committed back after every run. Never hand-edit except full reset: paste this original skeleton to start clean.",
  "version": 1,
  "tg_offset": 275565130,
- "last_discovery_date": "2026-11-03",
+ "last_discovery_date": "2026-11-04",
  "usage": {
   "month": "2026-11",
-  "fetched": 72,
+  "fetched": 96,
   "warned": false,
   "blocked": false
  },
@@ -116,6 +116,12 @@
    "w": "playstation-5-miami",
    "p": 450.0,
    "t": 1793669649,
+   "card": false
+  },
+  "2920136994846468": {
+   "w": "xbox-series-x-miami",
+   "p": 500.0,
+   "t": 1793758736,
    "card": false
   }
  },
