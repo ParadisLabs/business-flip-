@@ -85,6 +85,13 @@ secrets:
 
 - `EBAY_CLIENT_ID` — eBay Application ID (App ID)
 - `EBAY_CLIENT_SECRET` — eBay Certificate ID (Cert ID)
+- `EBAY_MARKETPLACE_ID` — optional; defaults to `EBAY_US`
+- `EBAY_CURRENCY` — optional; defaults to `USD`
+
+The broker fetches a small active fixed-price sample once per watch scan and
+shows its minimum/median only as market context. It does not change deal tiers,
+maximum offers or spread calculations. If credentials are absent or the API
+fails, Facebook discovery and sold-comp scoring continue unchanged.
 
 Browse results must be labelled **asking prices** and must never enter sold-price
 scoring. eBay Marketplace Insights can provide completed-sale history, but it is
