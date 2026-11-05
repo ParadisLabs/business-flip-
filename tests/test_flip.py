@@ -93,7 +93,7 @@ class Chain(unittest.TestCase):
             if old_id is not None: os.environ["EBAY_CLIENT_ID"] = old_id
             if old_secret is not None: os.environ["EBAY_CLIENT_SECRET"] = old_secret
         comps = fb.load_comps
-        fb.load_comps = lambda _: [(100.0, "verified_sold")]
+        fb.load_comps = lambda _: [(100.0, "verified_sold"), (110.0, "verified_sold"), (120.0, "verified_sold")]
         try:
             result = fb.price_deal(w, 50.0, "PlayStation 5 Disc Console")
             self.assertEqual(result["low"], 100.0)
