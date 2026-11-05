@@ -14,6 +14,7 @@ spec.loader.exec_module(fb)
 
 COMPS = json.load(open(os.path.join(ROOT, "comps.json")))["comps"]
 WATCHES = json.load(open(os.path.join(ROOT, "watches.json")))["watches"]
+REAL_LOAD_COMPS = fb.load_comps
 
 
 class Chain(unittest.TestCase):
@@ -110,6 +111,15 @@ class Chain(unittest.TestCase):
         pr = fb.price_deal(w, round(low * 0.55, 2), "PlayStation 5 for parts only")
         self.assertEqual(pr["tier"], "PASS")
         self.assertIn("parts only", pr["flags"])
+
+    def test_real_loader_excludes_non_sale_prices(self):
+        old_stale = fb.STALE_DAYS
+        fb.STALE_DAYS = 1000
+        try:
+            self.assertEqual(REAL_LOAD_COMPS("playstation-5-miami"), [])
+            self.assertEqual(len(REAL_LOAD_COMPS("macbook-air-m1-miami")), 3)
+        finally:
+            fb.STALE_DAYS = old_stale
 
     def test_watch_without_comps_never_cards(self):
         pr = fb.price_deal({"id": "no-such-watch"}, 50.0, "thing")
