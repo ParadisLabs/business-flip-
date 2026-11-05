@@ -28,8 +28,11 @@
 | 📤 POSTED | waits on buyer lead | follow-up reminder on your listing |
 | `/won <price>` or `/lost` | closes deal | outcome logged → flips P&L in digest |
 
-Buttons register on the next 15-min poll. Discovery scan runs once/day inside
-those runs (Apify budget guard — 800 listings/month cap, warn at 80%).
+Buttons register on the next 15-min poll. The persisted Telegram update offset
+is sent to Telegram so acknowledged updates are not repeatedly returned.
+Discovery scan runs once/day inside those runs (Apify result-request guard —
+800 results/month, warn at 80%). The request size is clamped to the remaining
+monthly allowance; failed scans leave the daily gate open for retry.
 
 ## Files
 
@@ -52,6 +55,7 @@ those runs (Apify budget guard — 800 listings/month cap, warn at 80%).
    - `TELEGRAM_CHAT_ID` — your chat id (numeric)
    - `APIFY_TOKEN` — apify.com → Settings → API & Integrations
    - `HUB_URL` — OpsHub `.convex.site` URL
+   - `HUB_FETCH_URL` — OpsHub watch-list read endpoint used by Flip Broker (optional; omit to use local `watches.json`)
    - `HUB_WEBHOOK_SECRET` — same secret as OpsHub
 5. Edit `watches.json` → Actions → Flip Broker → Run workflow (manual first)
 
@@ -64,7 +68,10 @@ those runs (Apify budget guard — 800 listings/month cap, warn at 80%).
 ## Comps are the whole system
 
 Garbage comps = fake spreads. 3–5 real prices per watch in `comps.json`,
-refresh monthly. Every card shows the comp source + date. MAX OFFER =
+refresh monthly. Expired comps are intentionally rejected; do not extend dates
+or invent prices to force cards. Keep sold prices separate from asking prices,
+and match model, storage, condition and included accessories. Every card shows
+the comp source + date. MAX OFFER =
 lowest comp − 10% costs − target fee − buffer (constants in flip_broker.py).
 
 ## Warnings
