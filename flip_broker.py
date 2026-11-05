@@ -178,6 +178,11 @@ def load_comps(watch_id):
     out = []
     today = datetime.now(timezone.utc).date()
     for c in entry.get("comps", []):
+        # Only completed-sale evidence may drive deal scoring. Retail and
+        # marketplace asking prices remain useful research notes, not proof
+        # of realized market value.
+        if not str(c.get("source", "")).lower().endswith("_sold"):
+            continue
         try:
             price = float(c["price"])
         except (KeyError, TypeError, ValueError):
@@ -251,8 +256,8 @@ def deal_card(watch, it, pr, tag=""):
     icon = "🔥" if pr["tier"] == "DEAL" else "🟡"
     lines = [
         f"{icon} {pr['tier']} — {it['title'][:60]} {tag}".rstrip(),
-        f"Asking ${it['price']:,.0f} | Comps low ${pr['low']:,.0f} "
-        f"({pr['n']} comps: {pr['src']})",
+        f"Asking ${it['price']:,.0f} | Sold comps low ${pr['low']:,.0f} "
+        f"({pr['n']} sold comps: {pr['src']})",
         f"MAX OFFER to seller: ${pr['max_offer']:,.0f}",
         f"Suggested list price: ${pr['est_list']:,.0f}",
         f"EST. spread ${pr['spread']:,.0f} ({pr['margin']*100:.0f}%) | "
