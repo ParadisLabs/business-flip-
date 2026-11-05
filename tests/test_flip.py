@@ -75,6 +75,12 @@ class Chain(unittest.TestCase):
     def test_parse_item_rejects_missing_price(self):
         self.assertIsNone(fb.parse_item({"posting_url": "u", "title": "x"}))
 
+    def test_title_identity_rejects_adjacent_console_and_game_bundle(self):
+        w = next(x for x in WATCHES if x["id"] == "playstation-5-miami")
+        self.assertFalse(fb.title_matches_watch(w, "PlayStation 3 with controllers"))
+        self.assertFalse(fb.title_matches_watch(w, "PlayStation 5 Game Bundle (8 Games)"))
+        self.assertTrue(fb.title_matches_watch(w, "PlayStation 5 Disc Console"))
+
     # --- pricing honesty ---
     def test_underpriced_listing_becomes_deal(self):
         w = next(x for x in WATCHES if x["id"] == "playstation-5-miami")
@@ -122,6 +128,19 @@ class Chain(unittest.TestCase):
         fb.process_listing(state, w, p)
         self.assertEqual(len(self.sent), 1, "duplicate listing re-carded")
         self.assertEqual(state["deals"]["listing-abc"]["status"], "contacted")
+
+    def test_previously_unpriced_listing_is_rechecked_when_comps_return(self):
+        w = next(x for x in WATCHES if x["id"] == "playstation-5-miami")
+        low = min(c["price"] for c in COMPS["playstation-5-miami"]["comps"])
+        state = {"seen": {"recover": {"w": w["id"], "p": low * .55,
+                                      "t": 1, "card": False, "nocomp": True}},
+                 "deals": {}, "usage": {"month": "2026-10", "fetched": 0}}
+        p = {"id": "recover", "title": "PlayStation 5 Disc Console",
+             "price": round(low * .55, 2), "url": "u", "city": "Miami"}
+        fb.process_listing(state, w, p)
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn("recover", state["deals"])
+        self.assertFalse(state["seen"]["recover"].get("nocomp", True))
 
     def test_over_budget_listing_is_ignored(self):
         w = {"id": "playstation-5-miami", "max_price": 100}
