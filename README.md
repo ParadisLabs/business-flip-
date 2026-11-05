@@ -79,9 +79,9 @@ lowest comp − 10% costs − target fee − buffer (constants in flip_broker.py
 
 ## Optional eBay market-data integration
 
-The next market-data connector should be eBay Browse API (active listings only).
-It requires an eBay developer application and these optional GitHub Actions
-secrets:
+The optional eBay Browse API connector enriches deal cards with active fixed-price
+asking context only. It requires an eBay developer application and these optional
+GitHub Actions secrets:
 
 - `EBAY_CLIENT_ID` — eBay Application ID (App ID)
 - `EBAY_CLIENT_SECRET` — eBay Certificate ID (Cert ID)
