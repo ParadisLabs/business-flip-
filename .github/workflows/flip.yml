@@ -1,6 +1,8 @@
 name: Flip Broker
 
 on:
+  pull_request:
+    branches: [main]
   schedule:
     - cron: "*/15 * * * *"
   workflow_dispatch:
