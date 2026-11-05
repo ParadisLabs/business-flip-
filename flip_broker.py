@@ -96,7 +96,11 @@ def tg_get_updates(offset):
     if not tok:
         return []
     try:
+        # Telegram confirms all updates below the supplied offset. Persisted
+        # state therefore prevents old callbacks/messages from filling the queue.
         url = TG_API.format(tok, "getUpdates") + "?timeout=0"
+        if int(offset or 0) > 0:
+            url += "&offset=" + str(int(offset))
         resp = http_json(url, headers=UA)
     except Exception as e:
         print("[tg] getUpdates failed:", e)
@@ -191,6 +195,26 @@ def load_comps(watch_id):
 def risk_flags(title):
     t = (title or "").lower()
     return [w for w in RISK_WORDS if w in t]
+
+def title_matches_watch(watch, title):
+    """Conservative identity check: reject obvious adjacent models/accessories."""
+    t = re.sub(r"[^a-z0-9]+", " ", (title or "").lower()).strip()
+    q = (watch.get("query") or "").lower()
+    if "playstation 5" in q or "ps5" in q:
+        return (bool(re.search(r"\\b(?:ps5|playstation 5)\\b", t))
+                and not re.search(r"\\b(?:ps3|playstation 3|ps4|playstation 4)\\b", t)
+                and not (re.search(r"\\bgames?\\b", t)
+                         and not re.search(r"\\b(?:console|system|disc edition|digital edition)\\b", t)))
+    if "xbox series x" in q:
+        return (bool(re.search(r"\\bxbox series x\\b", t))
+                and not re.search(r"\\bxbox series s\\b", t)
+                and not (re.search(r"\\bgames?\\b", t)
+                         and not re.search(r"\\b(?:console|system)\\b", t)))
+    if "macbook air m1" in q:
+        return bool(re.search(r"\\bmacbook air\\b", t) and re.search(r"\\bm1\\b", t))
+    # Generic watch: require all meaningful query terms to be present.
+    terms = [x for x in re.findall(r"[a-z0-9]+", q) if len(x) > 1]
+    return bool(terms) and all(x in t for x in terms)
 
 def price_deal(watch, asking, title):
     """REAL comps only -> honest broker math. Never guesses prices."""
@@ -447,6 +471,9 @@ def process_listing(state, w, p):
     old = seen.get(p["id"])
     if p["price"] > float(w.get("max_price", 10**9)):
         return
+    if not title_matches_watch(w, p["title"]):
+        print(f"[identity] rejected listing for {w['id']}: {p['title'][:80]}")
+        return
     pr = price_deal(w, p["price"], p["title"])
     if pr is None:
         # no real comps for this watch -> can't price it, don't card
@@ -454,7 +481,8 @@ def process_listing(state, w, p):
                          "t": int(time.time()), "card": False, "nocomp": True}
         return
     tag = ""
-    if old:
+    recovered_from_missing_comps = bool(old and old.get("nocomp"))
+    if old and not recovered_from_missing_comps:
         dropped = old["p"] > 0 and p["price"] <= old["p"] * 0.9
         if not dropped or old.get("card") or pr["tier"] == "PASS":
             return
@@ -462,12 +490,14 @@ def process_listing(state, w, p):
     else:
         if pr["tier"] == "PASS":
             seen[p["id"]] = {"w": w["id"], "p": p["price"],
-                             "t": int(time.time()), "card": False}
+                             "t": int(time.time()), "card": False, "nocomp": False}
             return
         active = sum(1 for d in state["deals"].values()
                      if d["status"] not in ("won", "lost"))
         if active >= MAX_ACTIVE:
             return
+        if recovered_from_missing_comps:
+            tag = "📊 COMPS RESTORED"
     seen[p["id"]] = {"w": w["id"], "p": p["price"], "t": int(time.time()), "card": True}
     state["deals"][p["id"]] = {"watch": w["id"], "title": p["title"],
                                "asking": p["price"], "status": "found",
@@ -499,13 +529,19 @@ def discovery(state, watches, force=False):
     print(f"[scan] discovery: {len(watches)} watches, "
           f"budget {u['fetched']}/{int(MONTHLY_CAP)}")
     no_comp_watches = []
+    successful_scans = 0
     for w in watches:
-        if u["fetched"] >= MONTHLY_CAP:
+        remaining = int(MONTHLY_CAP - u["fetched"])
+        if remaining <= 0:
             tg_send("🛑 Apify cap reached mid-scan — remaining watches skipped.")
             break
-        items = apify_search(w, w.get("results_cap", 8))
+        requested = max(0, min(int(w.get("results_cap", HUB_RESULTS_CAP)), remaining))
+        if requested <= 0:
+            break
+        items = apify_search(w, requested)
         if items is None:
             continue
+        successful_scans += 1
         u["fetched"] += len(items)
         seen_before = len(state["seen"])
         parsed = 0
@@ -533,7 +569,10 @@ def discovery(state, watches, force=False):
         print(f"[warn] {len(no_comp_watches)} watch(es) have no comps and will "
               f"never card: {', '.join(no_comp_watches)}. Add comps.json entries "
               f"or remove the watches.")
-    state["last_discovery_date"] = today
+    if successful_scans:
+        state["last_discovery_date"] = today
+    else:
+        print("[scan] no watch completed successfully; daily gate remains open for retry")
 
 # ---------------- main ----------------
 def main():
