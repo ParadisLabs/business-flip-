@@ -75,6 +75,20 @@ cards. Match model, storage, condition and included accessories. Every card
 shows the sold-comp source + date. MAX OFFER =
 lowest comp − 10% costs − target fee − buffer (constants in flip_broker.py).
 
+## Optional eBay market-data integration
+
+The next market-data connector should be eBay Browse API (active listings only).
+It requires an eBay developer application and these optional GitHub Actions
+secrets:
+
+- `EBAY_CLIENT_ID` — eBay Application ID (App ID)
+- `EBAY_CLIENT_SECRET` — eBay Certificate ID (Cert ID)
+
+Browse results must be labelled **asking prices** and must never enter sold-price
+scoring. eBay Marketplace Insights can provide completed-sale history, but it is
+a limited-release API and must not be assumed available until eBay approves the
+application. Until then, keep verified completed-sale records in `comps.json`.
+
 ## Warnings
 
 - Sellers must consent before you advertise their listing/photos
