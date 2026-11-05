@@ -201,17 +201,17 @@ def title_matches_watch(watch, title):
     t = re.sub(r"[^a-z0-9]+", " ", (title or "").lower()).strip()
     q = (watch.get("query") or "").lower()
     if "playstation 5" in q or "ps5" in q:
-        return (bool(re.search(r"\\b(?:ps5|playstation 5)\\b", t))
-                and not re.search(r"\\b(?:ps3|playstation 3|ps4|playstation 4)\\b", t)
-                and not (re.search(r"\\bgames?\\b", t)
-                         and not re.search(r"\\b(?:console|system|disc edition|digital edition)\\b", t)))
+        return (bool(re.search(r"\b(?:ps5|playstation 5)\\b", t))
+                and not re.search(r"\b(?:ps3|playstation 3|ps4|playstation 4)\\b", t)
+                and not (re.search(r"\bgames?\\b", t)
+                         and not re.search(r"\b(?:console|system|disc edition|digital edition)\\b", t)))
     if "xbox series x" in q:
-        return (bool(re.search(r"\\bxbox series x\\b", t))
-                and not re.search(r"\\bxbox series s\\b", t)
-                and not (re.search(r"\\bgames?\\b", t)
-                         and not re.search(r"\\b(?:console|system)\\b", t)))
+        return (bool(re.search(r"\bxbox series x\\b", t))
+                and not re.search(r"\bxbox series s\\b", t)
+                and not (re.search(r"\bgames?\\b", t)
+                         and not re.search(r"\b(?:console|system)\\b", t)))
     if "macbook air m1" in q:
-        return bool(re.search(r"\\bmacbook air\\b", t) and re.search(r"\\bm1\\b", t))
+        return bool(re.search(r"\bmacbook air\\b", t) and re.search(r"\bm1\\b", t))
     # Generic watch: require all meaningful query terms to be present.
     terms = [x for x in re.findall(r"[a-z0-9]+", q) if len(x) > 1]
     return bool(terms) and all(x in t for x in terms)
