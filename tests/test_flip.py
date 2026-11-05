@@ -20,6 +20,12 @@ class Chain(unittest.TestCase):
     def setUp(self):
         self.sent = []
         self.hub = []
+        # Freeze pricing fixtures: production correctly rejects old comps,
+        # while unit tests should not expire as the calendar advances.
+        fb.load_comps = lambda watch_id: [
+            (float(c["price"]), c.get("source", "?"))
+            for c in COMPS.get(watch_id, {}).get("comps", [])
+        ]
         fb.tg_send = lambda text, buttons=None: self.sent.append((text, buttons))
         fb.hub_emit = lambda kind, did, payload: self.hub.append((kind, did, payload))
 
@@ -141,6 +147,49 @@ class Chain(unittest.TestCase):
         self.assertEqual(len(self.sent), 1)
         self.assertIn("recover", state["deals"])
         self.assertFalse(state["seen"]["recover"].get("nocomp", True))
+
+    def test_telegram_offset_is_sent_to_get_updates(self):
+        old_token = os.environ.get("FLIP_TG_TOKEN")
+        os.environ["FLIP_TG_TOKEN"] = "test-token"
+        calls = []
+        original = fb.http_json
+        fb.http_json = lambda url, **kwargs: (calls.append(url) or {"result": []})
+        try:
+            fb.tg_get_updates(12345)
+        finally:
+            fb.http_json = original
+            if old_token is None:
+                os.environ.pop("FLIP_TG_TOKEN", None)
+            else:
+                os.environ["FLIP_TG_TOKEN"] = old_token
+        self.assertIn("offset=12345", calls[0])
+
+    def test_failed_scan_does_not_close_daily_retry_gate(self):
+        state = {"last_discovery_date": None,
+                 "usage": {"month": None, "fetched": 0, "warned": False, "blocked": False},
+                 "seen": {}, "deals": {}}
+        original = fb.apify_search
+        fb.apify_search = lambda watch, cap: None
+        try:
+            fb.discovery(state, [{"id": "w", "query": "item", "city": "miami",
+                                  "results_cap": 8}], force=True)
+        finally:
+            fb.apify_search = original
+        self.assertIsNone(state["last_discovery_date"])
+
+    def test_scan_clamps_actor_result_request_to_remaining_budget(self):
+        state = {"last_discovery_date": None,
+                 "usage": {"month": "2026-11", "fetched": 798, "warned": False, "blocked": False},
+                 "seen": {}, "deals": {}}
+        calls = []
+        original = fb.apify_search
+        fb.apify_search = lambda watch, cap: (calls.append(cap) or [])
+        try:
+            fb.discovery(state, [{"id": "w", "query": "item", "city": "miami",
+                                  "results_cap": 8}], force=True)
+        finally:
+            fb.apify_search = original
+        self.assertEqual(calls, [2])
 
     def test_over_budget_listing_is_ignored(self):
         w = {"id": "playstation-5-miami", "max_price": 100}
