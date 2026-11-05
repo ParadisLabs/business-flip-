@@ -82,6 +82,25 @@ class Chain(unittest.TestCase):
     def test_parse_item_rejects_missing_price(self):
         self.assertIsNone(fb.parse_item({"posting_url": "u", "title": "x"}))
 
+    def test_ebay_active_context_is_display_only(self):
+        w = next(x for x in WATCHES if x["id"] == "playstation-5-miami")
+        old_id, old_secret = os.environ.get("EBAY_CLIENT_ID"), os.environ.get("EBAY_CLIENT_SECRET")
+        os.environ.pop("EBAY_CLIENT_ID", None)
+        os.environ.pop("EBAY_CLIENT_SECRET", None)
+        try:
+            self.assertIsNone(fb.ebay_active_asking(w))
+        finally:
+            if old_id is not None: os.environ["EBAY_CLIENT_ID"] = old_id
+            if old_secret is not None: os.environ["EBAY_CLIENT_SECRET"] = old_secret
+        comps = fb.load_comps
+        fb.load_comps = lambda _: [(100.0, "verified_sold")]
+        try:
+            result = fb.price_deal(w, 50.0, "PlayStation 5 Disc Console")
+            self.assertEqual(result["low"], 100.0)
+            self.assertNotIn("ebay_active", result)
+        finally:
+            fb.load_comps = comps
+
     def test_title_identity_rejects_adjacent_console_and_game_bundle(self):
         w = next(x for x in WATCHES if x["id"] == "playstation-5-miami")
         self.assertFalse(fb.title_matches_watch(w, "PlayStation 3 with controllers"))
