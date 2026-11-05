@@ -67,11 +67,12 @@ monthly allowance; failed scans leave the daily gate open for retry.
 
 ## Comps are the whole system
 
-Garbage comps = fake spreads. 3–5 real prices per watch in `comps.json`,
-refresh monthly. Expired comps are intentionally rejected; do not extend dates
-or invent prices to force cards. Keep sold prices separate from asking prices,
-and match model, storage, condition and included accessories. Every card shows
-the comp source + date. MAX OFFER =
+Garbage comps = fake spreads. 3–5 completed-sale prices per watch in `comps.json`,
+refresh monthly. Deal scoring ignores sources not explicitly tagged with a `_sold`
+suffix; retail and asking prices are not proof of realized sale value. Expired
+comps are intentionally rejected; do not extend dates or invent prices to force
+cards. Match model, storage, condition and included accessories. Every card
+shows the sold-comp source + date. MAX OFFER =
 lowest comp − 10% costs − target fee − buffer (constants in flip_broker.py).
 
 ## Warnings
