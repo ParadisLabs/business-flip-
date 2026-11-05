@@ -32,7 +32,9 @@ Buttons register on the next 15-min poll. The persisted Telegram update offset
 is sent to Telegram so acknowledged updates are not repeatedly returned.
 Discovery scan runs once/day inside those runs (Apify result-request guard —
 800 results/month, warn at 80%). The request size is clamped to the remaining
-monthly allowance; failed scans leave the daily gate open for retry.
+monthly allowance; failed scans leave the daily gate open for retry. This is a
+result-count guard, not a dollar/CU spend cap: set an Apify account spending
+limit in the Apify console because actor pricing varies by actor and usage.
 
 ## Files
 
