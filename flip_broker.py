@@ -498,7 +498,8 @@ def process_listing(state, w, p):
             return
         if recovered_from_missing_comps:
             tag = "📊 COMPS RESTORED"
-    seen[p["id"]] = {"w": w["id"], "p": p["price"], "t": int(time.time()), "card": True}
+    seen[p["id"]] = {"w": w["id"], "p": p["price"], "t": int(time.time()),
+                     "card": True, "nocomp": False}
     state["deals"][p["id"]] = {"watch": w["id"], "title": p["title"],
                                "asking": p["price"], "status": "found",
                                "opened_ts": int(time.time()),
