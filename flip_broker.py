@@ -281,7 +281,8 @@ def ebay_active_asking(watch, limit=10):
             _EBAY_TOKEN_EXPIRES = now + int(token_data.get("expires_in", 7200))
         marketplace = os.environ.get("EBAY_MARKETPLACE_ID", "EBAY_US").strip() or "EBAY_US"
         currency = os.environ.get("EBAY_CURRENCY", "USD").strip().upper() or "USD"
-        query = urllib.parse.urlencode({"q": watch.get("query", ""), "limit": int(limit)})
+        query = urllib.parse.urlencode({"q": watch.get("query", ""), "limit": int(limit),
+                                        "filter": "buyingOptions:{FIXED_PRICE}"})
         url = "https://api.ebay.com/buy/browse/v1/item_summary/search?" + query
         req = urllib.request.Request(url, headers={
             "Authorization": "Bearer " + _EBAY_TOKEN,
