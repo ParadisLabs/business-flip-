@@ -55,7 +55,7 @@ monthly allowance; failed scans leave the daily gate open for retry.
    - `TELEGRAM_CHAT_ID` — your chat id (numeric)
    - `APIFY_TOKEN` — apify.com → Settings → API & Integrations
    - `HUB_URL` — OpsHub `.convex.site` URL
-   - `HUB_FETCH_URL` — OpsHub watch-list read endpoint used by Flip Broker (optional; omit to use local `watches.json`)
+   - `HUB_FETCH_URL` — `https://<your-convex-deployment>.convex.site/flipwatches?token=<TELEGRAM_WEBHOOK_SECRET>`; the query token must match OpsHub's Convex `TELEGRAM_WEBHOOK_SECRET` (not `HUB_WEBHOOK_SECRET`). A 403 means the URL/token pair is wrong; omit the secret only if you intentionally want local `watches.json` fallback.
    - `HUB_WEBHOOK_SECRET` — same secret as OpsHub
 5. Edit `watches.json` → Actions → Flip Broker → Run workflow (manual first)
 
