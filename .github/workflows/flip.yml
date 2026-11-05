@@ -58,6 +58,10 @@ jobs:
           FLIP_TG_TOKEN: ${{ secrets.FLIP_TG_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          EBAY_CLIENT_ID: ${{ secrets.EBAY_CLIENT_ID }}
+          EBAY_CLIENT_SECRET: ${{ secrets.EBAY_CLIENT_SECRET }}
+          EBAY_MARKETPLACE_ID: ${{ vars.EBAY_MARKETPLACE_ID }}
+          EBAY_CURRENCY: ${{ vars.EBAY_CURRENCY }}
           HUB_URL: ${{ secrets.HUB_URL }}
           HUB_FETCH_URL: ${{ secrets.HUB_FETCH_URL }}
           FLIP_FORCE_DISCOVERY: ${{ inputs.force_discovery }}
