@@ -125,6 +125,9 @@ def load_state():
     s = load_json(STATE_PATH, None) or {}
     s.setdefault("tg_offset", 0)
     s.setdefault("last_discovery_date", None)
+    # Track each watch independently so a transient provider failure does not
+    # suppress retries for the rest of the day or re-spend on successful watches.
+    s.setdefault("last_discovery_by_watch", {})
     s.setdefault("usage", {"month": None, "fetched": 0, "warned": False, "blocked": False})
     s.setdefault("seen", {})
     s.setdefault("deals", {})
@@ -157,6 +160,9 @@ def load_hub_watches():
                         "max_price": mp,
                         "category": str(w.get("category") or "other"),
                         "results_cap": HUB_RESULTS_CAP})
+        if not out:
+            print("[hub] no usable watches returned — falling back to watches.json")
+            return None
         print(f"[hub] using {len(out)} hub-managed watches")
         return out
     except Exception as e:
@@ -483,8 +489,9 @@ def process_listing(state, w, p):
 
 def discovery(state, watches, force=False):
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    if state["last_discovery_date"] == today and not force:
-        print("[scan] already scanned today — skipping (set FLIP_FORCE_DISCOVERY=1 to override)")
+    by_watch = state.setdefault("last_discovery_by_watch", {})
+    if state.get("last_discovery_date") == today and not force:
+        print("[scan] all watches already scanned today")
         return
     u = state["usage"]
     if u["month"] != today[:7]:
@@ -499,13 +506,24 @@ def discovery(state, watches, force=False):
     print(f"[scan] discovery: {len(watches)} watches, "
           f"budget {u['fetched']}/{int(MONTHLY_CAP)}")
     no_comp_watches = []
+    attempted = 0
+    succeeded = 0
     for w in watches:
+        wid = str(w.get("id") or "")
+        if not force and by_watch.get(wid) == today:
+            print(f"[scan] {wid}: already scanned today — skipping")
+            continue
         if u["fetched"] >= MONTHLY_CAP:
             tg_send("🛑 Apify cap reached mid-scan — remaining watches skipped.")
             break
+        attempted += 1
         items = apify_search(w, w.get("results_cap", 8))
         if items is None:
+            print(f"[scan] {wid}: provider failed — will retry on the next scheduled poll")
             continue
+        # An empty list is a successful scan; None means the provider failed.
+        by_watch[wid] = today
+        succeeded += 1
         u["fetched"] += len(items)
         seen_before = len(state["seen"])
         parsed = 0
@@ -533,7 +551,15 @@ def discovery(state, watches, force=False):
         print(f"[warn] {len(no_comp_watches)} watch(es) have no comps and will "
               f"never card: {', '.join(no_comp_watches)}. Add comps.json entries "
               f"or remove the watches.")
-    state["last_discovery_date"] = today
+    # Only close the daily discovery window when every configured watch
+    # has a successful result for today. Failed watches remain retryable.
+    if all(by_watch.get(str(w.get("id") or "")) == today for w in watches):
+        state["last_discovery_date"] = today
+    else:
+        state["last_discovery_date"] = None
+    print(f"[scan] completed {succeeded}/{attempted} attempted watches; "
+          f"{sum(1 for w in watches if by_watch.get(str(w.get('id') or '')) == today)}/{len(watches)} "
+          "watches successful today")
 
 # ---------------- main ----------------
 def main():
