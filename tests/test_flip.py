@@ -109,8 +109,7 @@ class Chain(unittest.TestCase):
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".json") as f:
             json.dump(fixture, f)
             f.flush()
-            with patch.object(fb, "load_comps", REAL_LOAD_COMPS), \\
-                 patch.object(fb, "COMPS_PATH", f.name):
+            with patch.object(fb, "load_comps", REAL_LOAD_COMPS), patch.object(fb, "COMPS_PATH", f.name):
                 self.assertEqual(fb.load_comps("test-watch"), [(120.0, "marketplace_sold")])
 
     # --- pricing honesty ---
