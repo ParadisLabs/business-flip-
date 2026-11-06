@@ -23,7 +23,18 @@ class Chain(unittest.TestCase):
         self.hub = []
         fb.tg_send = lambda text, buttons=None: self.sent.append((text, buttons))
         fb.hub_emit = lambda kind, did, payload: self.hub.append((kind, did, payload))
-        # Pricing/card tests must not depend on the live comps.json freshness\n        # window. Use a fixed, explicitly test-only comp set; the separate\n        # config-integrity test still checks the real comps file structure.\n        self.comps_patch = patch.object(\n            fb, "load_comps",\n            side_effect=lambda watch_id: (\n                [(466.0, "test_sold"), (469.0, "test_sold"), (478.0, "test_sold")]\n                if watch_id == "playstation-5-miami" else []\n            ),\n        )\n        self.comps_patch.start()\n        self.addCleanup(self.comps_patch.stop)
+        # Pricing/card tests must not depend on the live comps.json freshness
+        # window. Use a fixed, explicitly test-only comp set; the separate
+        # config-integrity test still checks the real comps file structure.
+        self.comps_patch = patch.object(
+            fb, "load_comps",
+            side_effect=lambda watch_id: (
+                [(466.0, "test_sold"), (469.0, "test_sold"), (478.0, "test_sold")]
+                if watch_id == "playstation-5-miami" else []
+            ),
+        )
+        self.comps_patch.start()
+        self.addCleanup(self.comps_patch.stop)
 
     # --- config integrity: the defect that silently killed carding ---
     def test_every_watch_has_comps(self):
