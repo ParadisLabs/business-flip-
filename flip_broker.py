@@ -12,7 +12,7 @@ fallback when the hub is unreachable or has no watches.
 You never buy: lock the seller, advertise, find the buyer, collect the fee.
 Stdlib only. Runs free on GitHub Actions.
 """
-import os, re, json, time, hmac, hashlib, urllib.request, urllib.error, urllib.parse
+import os, re, json, time, hmac, hashlib, math, urllib.request, urllib.error, urllib.parse
 from datetime import datetime, timezone
 
 # ---------------- paths & constants ----------------
@@ -172,26 +172,28 @@ def load_hub_watches():
 
 # ---------------- comps & pricing ----------------
 def load_comps(watch_id):
-    """Return real comps for a watch. watch_id must match a key in comps.json
-    under comps.comps.<watch_id>.comps. If the active file watch's id does not
-    match any comp key, this returns [] and the listing will NOT be carded —
-    which is correct (no real price data = no deal claim)."""
+    """Return only recent, dated completed-sale evidence for deal scoring.
+
+    Asking/retail prices may be displayed as research context elsewhere, but
+    they must never establish the market floor or trigger a DEAL/WATCH card.
+    Missing, malformed, future-dated, stale, non-finite and non-positive
+    observations are excluded conservatively.
+    """
     data = load_json(COMPS_PATH, {})
     entry = (data.get("comps") or {}).get(watch_id) or {}
     out = []
     today = datetime.now(timezone.utc).date()
     for c in entry.get("comps", []):
+        if not str(c.get("source", "")).strip().lower().endswith("_sold"):
+            continue
         try:
             price = float(c["price"])
+            d = datetime.strptime(str(c.get("date", "")), "%Y-%m-%d").date()
         except (KeyError, TypeError, ValueError):
             continue
-        d = None
-        try:
-            d = datetime.strptime(str(c.get("date", "")), "%Y-%m-%d").date()
-        except ValueError:
-            pass
-        if d and (today - d).days > STALE_DAYS:
-            continue  # stale comp — ignored
+        age_days = (today - d).days
+        if not math.isfinite(price) or price <= 0 or age_days < 0 or age_days > STALE_DAYS:
+            continue
         out.append((price, c.get("source", "?")))
     return out
 
@@ -505,7 +507,23 @@ def discovery(state, watches, force=False):
         return
     print(f"[scan] discovery: {len(watches)} watches, "
           f"budget {u['fetched']}/{int(MONTHLY_CAP)}")
-    no_comp_watches = []
+    # Report missing trustworthy pricing evidence independently of provider
+    # success, so stale/asking-only comps are visible even on failed scans.
+    no_comp_watches = [
+        str(w.get("id") or "") for w in watches
+        if not load_comps(str(w.get("id") or ""))
+    ]
+    if no_comp_watches:
+        warning = (f"[warn] {len(no_comp_watches)} watch(es) have no fresh sold comps "
+                   f"and cannot be priced: {', '.join(no_comp_watches)}. "
+                   "Refresh comps.json with at least 3 recent comparable completed sales per watch.")
+        print(warning)
+        if state.get("last_comp_warning_date") != today:
+            tg_send("⚠️ Flip Broker: some active watches have no fresh completed-sale comps, "
+                    "so listings will be skipped rather than priced with stale or asking-only data.\\n"
+                    + ", ".join(no_comp_watches)
+                    + "\\nRefresh comps.json with at least 3 recent comparable completed sales per watch.")
+            state["last_comp_warning_date"] = today
     attempted = 0
     succeeded = 0
     for w in watches:
