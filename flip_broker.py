@@ -128,6 +128,7 @@ def load_state():
     # Track each watch independently so a transient provider failure does not
     # suppress retries for the rest of the day or re-spend on successful watches.
     s.setdefault("last_discovery_by_watch", {})
+    s.setdefault("last_comp_warning_date", None)
     s.setdefault("usage", {"month": None, "fetched": 0, "warned": False, "blocked": False})
     s.setdefault("seen", {})
     s.setdefault("deals", {})
@@ -548,9 +549,16 @@ def discovery(state, watches, force=False):
         if w["id"] not in no_comp_watches and not load_comps(w["id"]):
             no_comp_watches.append(w["id"])
     if no_comp_watches:
-        print(f"[warn] {len(no_comp_watches)} watch(es) have no comps and will "
-              f"never card: {', '.join(no_comp_watches)}. Add comps.json entries "
-              f"or remove the watches.")
+        warning = (f"[warn] {len(no_comp_watches)} watch(es) have no fresh comps "
+                   f"and cannot be priced: {', '.join(no_comp_watches)}. "
+                   "Refresh comps.json (at least 3 recent comparable prices per watch).")
+        print(warning)
+        if state.get("last_comp_warning_date") != today:
+            tg_send("⚠️ Flip Broker: some active watches have no fresh comps, so "
+                    "listings will be skipped rather than priced with stale data.\n"
+                    + ", ".join(no_comp_watches)
+                    + "\nRefresh comps.json with at least 3 recent comparable prices per watch.")
+            state["last_comp_warning_date"] = today
     # Only close the daily discovery window when every configured watch
     # has a successful result for today. Failed watches remain retryable.
     if all(by_watch.get(str(w.get("id") or "")) == today for w in watches):
