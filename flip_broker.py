@@ -491,9 +491,8 @@ def process_listing(state, w, p):
 def discovery(state, watches, force=False):
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     by_watch = state.setdefault("last_discovery_by_watch", {})
-    if state.get("last_discovery_date") == today and not force:
-        print("[scan] all watches already scanned today")
-        return
+    # Per-watch markers are authoritative. Do not trust the legacy global
+    # date gate: older runs could set it even when every provider call failed.
     u = state["usage"]
     if u["month"] != today[:7]:
         u["month"], u["fetched"] = today[:7], 0
