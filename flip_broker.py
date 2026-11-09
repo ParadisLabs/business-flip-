@@ -12,7 +12,7 @@ fallback when the hub is unreachable or has no watches.
 You never buy: lock the seller, advertise, find the buyer, collect the fee.
 Stdlib only. Runs free on GitHub Actions.
 """
-import os, re, json, time, hmac, hashlib, base64, statistics, urllib.request, urllib.error, urllib.parse
+import os, re, json, time, hmac, hashlib, math, base64, statistics, urllib.request, urllib.error, urllib.parse
 from datetime import datetime, timezone
 
 # ---------------- paths & constants ----------------
@@ -131,6 +131,10 @@ def load_state():
     s = load_json(STATE_PATH, None) or {}
     s.setdefault("tg_offset", 0)
     s.setdefault("last_discovery_date", None)
+    # Track each watch independently so a transient provider failure does not
+    # suppress retries for the rest of the day or re-spend on successful watches.
+    s.setdefault("last_discovery_by_watch", {})
+    s.setdefault("last_comp_warning_date", None)
     s.setdefault("usage", {"month": None, "fetched": 0, "warned": False, "blocked": False})
     s.setdefault("seen", {})
     s.setdefault("deals", {})
@@ -163,6 +167,9 @@ def load_hub_watches():
                         "max_price": mp,
                         "category": str(w.get("category") or "other"),
                         "results_cap": HUB_RESULTS_CAP})
+        if not out:
+            print("[hub] no usable watches returned — falling back to watches.json")
+            return None
         print(f"[hub] using {len(out)} hub-managed watches")
         return out
     except Exception as e:
@@ -171,31 +178,28 @@ def load_hub_watches():
 
 # ---------------- comps & pricing ----------------
 def load_comps(watch_id):
-    """Return real comps for a watch. watch_id must match a key in comps.json
-    under comps.comps.<watch_id>.comps. If the active file watch's id does not
-    match any comp key, this returns [] and the listing will NOT be carded —
-    which is correct (no real price data = no deal claim)."""
+    """Return only recent, dated completed-sale evidence for deal scoring.
+
+    Asking/retail prices may be displayed as research context elsewhere, but
+    they must never establish the market floor or trigger a DEAL/WATCH card.
+    Missing, malformed, future-dated, stale, non-finite and non-positive
+    observations are excluded conservatively.
+    """
     data = load_json(COMPS_PATH, {})
     entry = (data.get("comps") or {}).get(watch_id) or {}
     out = []
     today = datetime.now(timezone.utc).date()
     for c in entry.get("comps", []):
-        # Only completed-sale evidence may drive deal scoring. Retail and
-        # marketplace asking prices remain useful research notes, not proof
-        # of realized market value.
-        if not str(c.get("source", "")).lower().endswith("_sold"):
+        if not str(c.get("source", "")).strip().lower().endswith("_sold"):
             continue
         try:
             price = float(c["price"])
+            d = datetime.strptime(str(c.get("date", "")), "%Y-%m-%d").date()
         except (KeyError, TypeError, ValueError):
             continue
-        d = None
-        try:
-            d = datetime.strptime(str(c.get("date", "")), "%Y-%m-%d").date()
-        except ValueError:
-            pass
-        if d and (today - d).days > STALE_DAYS:
-            continue  # stale comp — ignored
+        age_days = (today - d).days
+        if not math.isfinite(price) or price <= 0 or age_days < 0 or age_days > STALE_DAYS:
+            continue
         out.append((price, c.get("source", "?")))
     return out
 
@@ -627,9 +631,9 @@ def process_listing(state, w, p, market_context=None):
 
 def discovery(state, watches, force=False):
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    if state["last_discovery_date"] == today and not force:
-        print("[scan] already scanned today — skipping (set FLIP_FORCE_DISCOVERY=1 to override)")
-        return
+    by_watch = state.setdefault("last_discovery_by_watch", {})
+    # Per-watch markers are authoritative. Do not trust the legacy global
+    # date gate: older runs could set it even when every provider call failed.
     u = state["usage"]
     if u["month"] != today[:7]:
         u["month"], u["fetched"] = today[:7], 0
@@ -642,12 +646,32 @@ def discovery(state, watches, force=False):
         return
     print(f"[scan] discovery: {len(watches)} watches, "
           f"budget {u['fetched']}/{int(MONTHLY_CAP)}")
-    no_comp_watches = []
-    successful_scans = 0
+    # Report missing trustworthy pricing evidence independently of provider
+    # success, so stale/asking-only comps are visible even on failed scans.
+    no_comp_watches = [
+        str(w.get("id") or "") for w in watches
+        if not load_comps(str(w.get("id") or ""))
+    ]
+    if no_comp_watches:
+        warning = (f"[warn] {len(no_comp_watches)} watch(es) have no fresh sold comps "
+                   f"and cannot be priced: {', '.join(no_comp_watches)}. "
+                   "Refresh comps.json with at least 3 recent comparable completed sales per watch.")
+        print(warning)
+        if state.get("last_comp_warning_date") != today:
+            tg_send("⚠️ Flip Broker: some active watches have no fresh completed-sale comps, "
+                    "so listings will be skipped rather than priced with stale or asking-only data.\n"
+                    + ", ".join(no_comp_watches)
+                    + "\nRefresh comps.json with at least 3 recent comparable completed sales per watch.")
+            state["last_comp_warning_date"] = today
     health = {"scanned_at": int(time.time()), "watches": len(watches), "ok": 0,
               "failed": 0, "zero_results": 0, "parsed": 0,
               "rejected_currency": 0, "stale": 0}
+    successful_scans = 0
     for w in watches:
+        wid = str(w.get("id") or "")
+        if not force and by_watch.get(wid) == today:
+            print(f"[scan] {wid}: already scanned today — skipping")
+            continue
         remaining = int(MONTHLY_CAP - u["fetched"])
         if remaining <= 0:
             tg_send("🛑 Apify cap reached mid-scan — remaining watches skipped.")
@@ -658,7 +682,9 @@ def discovery(state, watches, force=False):
         items = apify_search(w, requested)
         if items is None:
             health["failed"] += 1
+            print(f"[scan] {wid}: provider failed — will retry on the next scheduled poll")
             continue
+        by_watch[wid] = today
         successful_scans += 1
         health["ok"] += 1
         if not items:
@@ -696,14 +722,26 @@ def discovery(state, watches, force=False):
         if w["id"] not in no_comp_watches and not load_comps(w["id"]):
             no_comp_watches.append(w["id"])
     if no_comp_watches:
-        print(f"[warn] {len(no_comp_watches)} watch(es) have no comps and will "
-              f"never card: {', '.join(no_comp_watches)}. Add comps.json entries "
-              f"or remove the watches.")
+        warning = (f"[warn] {len(no_comp_watches)} watch(es) have no fresh comps "
+                   f"and cannot be priced: {', '.join(no_comp_watches)}. "
+                   "Refresh comps.json (at least 3 recent comparable prices per watch).")
+        print(warning)
+        if state.get("last_comp_warning_date") != today:
+            tg_send("⚠️ Flip Broker: some active watches have no fresh comps, so "
+                    "listings will be skipped rather than priced with stale data.\n"
+                    + ", ".join(no_comp_watches)
+                    + "\nRefresh comps.json with at least 3 recent comparable prices per watch.")
+            state["last_comp_warning_date"] = today
     state["source_health"] = health
-    if successful_scans:
+    # Only close the daily discovery window when every configured watch
+    # has a successful result for today. Failed watches remain retryable.
+    if all(by_watch.get(str(w.get("id") or "")) == today for w in watches):
         state["last_discovery_date"] = today
     else:
-        print("[scan] no watch completed successfully; daily gate remains open for retry")
+        state["last_discovery_date"] = None
+    print(f"[scan] completed {successful_scans}/{len(watches)} successful watches; "
+          f"{sum(1 for w in watches if by_watch.get(str(w.get('id') or '')) == today)}/{len(watches)} "
+          "watches successful today")
 
 # ---------------- main ----------------
 def main():

@@ -3,7 +3,9 @@
 These run with no network and no secrets: Telegram and hub emission are
 monkeypatched, and Apify payloads are fed in as realistic actor items.
 """
-import importlib.util, json, os, sys, unittest
+import importlib.util, json, os, sys, tempfile, unittest
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -29,6 +31,18 @@ class Chain(unittest.TestCase):
         ]
         fb.tg_send = lambda text, buttons=None: self.sent.append((text, buttons))
         fb.hub_emit = lambda kind, did, payload: self.hub.append((kind, did, payload))
+        # Pricing/card tests must not depend on the live comps.json freshness
+        # window. Use a fixed, explicitly test-only comp set; the separate
+        # config-integrity test still checks the real comps file structure.
+        self.comps_patch = patch.object(
+            fb, "load_comps",
+            side_effect=lambda watch_id: (
+                [(466.0, "test_sold"), (469.0, "test_sold"), (478.0, "test_sold")]
+                if watch_id == "playstation-5-miami" else []
+            ),
+        )
+        self.comps_patch.start()
+        self.addCleanup(self.comps_patch.stop)
 
     # --- config integrity: the defect that silently killed carding ---
     def test_every_watch_has_comps(self):
@@ -106,6 +120,28 @@ class Chain(unittest.TestCase):
         self.assertFalse(fb.title_matches_watch(w, "PlayStation 3 with controllers"))
         self.assertFalse(fb.title_matches_watch(w, "PlayStation 5 Game Bundle (8 Games)"))
         self.assertTrue(fb.title_matches_watch(w, "PlayStation 5 Disc Console"))
+
+    def test_load_comps_requires_fresh_completed_sales(self):
+        today = datetime.now(timezone.utc).date()
+        fixture = {
+            "comps": {
+                "test-watch": {"comps": [
+                    {"price": 120, "source": "marketplace_sold", "date": today.isoformat()},
+                    {"price": 150, "source": "marketplace_asking", "date": today.isoformat()},
+                    {"price": 110, "source": "swappa_sold",
+                     "date": (today - timedelta(days=fb.STALE_DAYS + 1)).isoformat()},
+                    {"price": 130, "source": "swappa_sold", "date": "not-a-date"},
+                    {"price": 140, "source": "swappa_sold",
+                     "date": (today + timedelta(days=1)).isoformat()},
+                    {"price": 0, "source": "swappa_sold", "date": today.isoformat()},
+                ]}
+            }
+        }
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".json") as f:
+            json.dump(fixture, f)
+            f.flush()
+            with patch.object(fb, "load_comps", REAL_LOAD_COMPS), patch.object(fb, "COMPS_PATH", f.name):
+                self.assertEqual(fb.load_comps("test-watch"), [(120.0, "marketplace_sold")])
 
     # --- pricing honesty ---
     def test_underpriced_listing_becomes_deal(self):
