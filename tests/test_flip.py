@@ -239,5 +239,52 @@ class Chain(unittest.TestCase):
         self.assertNotIn("new", state["deals"])
 
 
+class NormalizationAndHealth(unittest.TestCase):
+    def test_non_usd_listing_is_rejected(self):
+        item = {"listingUrl": "https://www.facebook.com/marketplace/item/1",
+                "id": "1", "listing_price": {"amount": "300", "currency": "EUR"},
+                "marketplace_listing_title": "PlayStation 5 Disc Console"}
+        self.assertIsNone(fb.parse_item(item))
+
+    def test_recent_usd_listing_keeps_currency(self):
+        item = {"listingUrl": "https://www.facebook.com/marketplace/item/2",
+                "id": "2", "listing_price": {"amount": "300", "currency": "usd"},
+                "marketplace_listing_title": "PlayStation 5 Disc Console"}
+        parsed = fb.parse_item(item)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed["currency"], "USD")
+
+    def test_stale_and_negative_listings_are_rejected(self):
+        import time as _time
+        base = {"listingUrl": "https://www.facebook.com/marketplace/item/3",
+                "id": "3", "listing_price": {"amount": "100", "currency": "USD"},
+                "marketplace_listing_title": "PlayStation 5 Disc Console"}
+        old = dict(base, creation_time=int(_time.time()) - 31 * 86400)
+        self.assertIsNone(fb.parse_item(old))
+        recent = dict(base, creation_time=int(_time.time()) - 86400)
+        self.assertIsNotNone(fb.parse_item(recent))
+        self.assertIsNone(fb.parse_item(dict(base, listing_price={"amount": "-1"})))
+        self.assertIsNone(fb.parse_item(dict(base, listing_price={"amount": "0"})))
+
+    def test_source_health_distinguishes_failure_from_zero_results(self):
+        state = {"last_discovery_date": None,
+                 "usage": {"month": None, "fetched": 0, "warned": False, "blocked": False},
+                 "seen": {}, "deals": {}}
+        original = fb.apify_search
+        answers = iter([None, []])
+        fb.apify_search = lambda watch, cap: next(answers)
+        try:
+            fb.discovery(state, [
+                {"id": "a", "query": "item a", "city": "miami", "results_cap": 2},
+                {"id": "b", "query": "item b", "city": "miami", "results_cap": 2},
+            ], force=True)
+        finally:
+            fb.apify_search = original
+        health = state["source_health"]
+        self.assertEqual(health["failed"], 1)
+        self.assertEqual(health["zero_results"], 1)
+        self.assertEqual(health["ok"], 1)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

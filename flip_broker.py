@@ -35,6 +35,8 @@ FEE_PCT = 0.35             # your fee as a share of expected spread
 FEE_MIN, FEE_MAX = 50.0, 1500.0
 LIST_DISCOUNT = 0.05       # list just under the lowest comp to move fast
 STALE_DAYS = 30            # comps older than this are ignored
+STALE_LISTING_DAYS = 30    # stale marketplace listings are not cards
+SUPPORTED_CURRENCIES = {"USD"}
 MAX_ACTIVE = 5             # don't chase more deals than this at once
 try:                        # verification knob; unset in normal operation
     MAX_ACTIVE = int(os.environ.get("FLIP_MAX_ACTIVE", "") or MAX_ACTIVE)
@@ -461,8 +463,11 @@ def handle_command(state, msg):
         act = [d for d in state["deals"].values()
                if d["status"] not in ("won", "lost")]
         u = state["usage"]
+        h = state.get("source_health") or {}
         lines = [f"🤝 Flip Broker — {len(act)} active / {len(state['deals'])} total",
-                 f"Apify this month: {u['fetched']}/{int(MONTHLY_CAP)}"]
+                 f"Apify this month: {u['fetched']}/{int(MONTHLY_CAP)}",
+                 f"Source: {h.get('ok', 0)} ok · {h.get('zero_results', 0)} zero · "
+                 f"{h.get('failed', 0)} failed · {h.get('rejected_currency', 0)} non-USD"]
         for d in act[:8]:
             lines.append(f"• {d['title'][:32]} — {d['status']} (${d.get('asking', 0):,.0f})")
         tg_send("\n".join(lines))
@@ -516,7 +521,15 @@ def parse_item(it):
         return None
     if it.get("is_sold") or it.get("is_pending") or it.get("is_hidden"):
         return None
-    price = it.get("listing_price")
+    raw_price = it.get("listing_price")
+    currency = "USD"
+    if isinstance(raw_price, dict):
+        currency = str(raw_price.get("currency") or "USD").upper()
+    elif it.get("currency"):
+        currency = str(it.get("currency")).upper()
+    if currency not in SUPPORTED_CURRENCIES:
+        return None
+    price = raw_price
     if isinstance(price, dict):
         price = price.get("amount", price.get("price"))
     if price is None:
@@ -524,10 +537,11 @@ def parse_item(it):
     if price is None:
         price = it.get("min_listing_price") or it.get("strikethrough_price")
     if isinstance(price, str):
-        m = re.search(r"[\d,]+(?:\.\d+)?", price)
-        if not m:
+        cleaned = re.sub(r"[^0-9.\-]", "", price)
+        try:
+            price = float(cleaned)
+        except ValueError:
             return None
-        price = float(m.group().replace(",", ""))
     try:
         price = float(price)
     except (TypeError, ValueError):
@@ -542,10 +556,26 @@ def parse_item(it):
     city = ""
     if isinstance(loc, dict):
         city = loc.get("city") or (loc.get("reverse_geocode") or {}).get("city") or ""
+    listed_at = None
+    for key in ("creation_time", "creationTime", "listed_at", "listedAt"):
+        if it.get(key) is not None:
+            try:
+                value = float(it[key])
+                listed_at = int(value / 1000) if value > 10_000_000_000 else int(value)
+            except (TypeError, ValueError):
+                pass
+            break
+    if listed_at and int(time.time()) - listed_at > STALE_LISTING_DAYS * 86400:
+        return None
     return {"id": did, "title": title or "Untitled listing", "price": price,
-            "url": url.split("?")[0], "city": city}
+            "url": url.split("?")[0], "city": city, "currency": currency,
+            "listed_at": listed_at}
 
 def process_listing(state, w, p, market_context=None):
+    if p.get("currency", "USD") not in SUPPORTED_CURRENCIES:
+        return
+    if p.get("listed_at") and int(time.time()) - int(p["listed_at"]) > STALE_LISTING_DAYS * 86400:
+        return
     if p["id"] in state["deals"]:
         return  # known deal — never re-card or reset its status
     seen = state["seen"]
@@ -614,6 +644,9 @@ def discovery(state, watches, force=False):
           f"budget {u['fetched']}/{int(MONTHLY_CAP)}")
     no_comp_watches = []
     successful_scans = 0
+    health = {"scanned_at": int(time.time()), "watches": len(watches), "ok": 0,
+              "failed": 0, "zero_results": 0, "parsed": 0,
+              "rejected_currency": 0, "stale": 0}
     for w in watches:
         remaining = int(MONTHLY_CAP - u["fetched"])
         if remaining <= 0:
@@ -624,8 +657,12 @@ def discovery(state, watches, force=False):
             break
         items = apify_search(w, requested)
         if items is None:
+            health["failed"] += 1
             continue
         successful_scans += 1
+        health["ok"] += 1
+        if not items:
+            health["zero_results"] += 1
         # One optional eBay Browse request per watch scan. Active asking prices
         # are display-only and cannot affect price_deal(), which uses sold comps.
         market_context = ebay_active_asking(w)
@@ -633,9 +670,15 @@ def discovery(state, watches, force=False):
         seen_before = len(state["seen"])
         parsed = 0
         for it in items:
+            if isinstance(it, dict):
+                raw = it.get("listing_price")
+                cur = (raw.get("currency") if isinstance(raw, dict) else it.get("currency")) or "USD"
+                if str(cur).upper() not in SUPPORTED_CURRENCIES:
+                    health["rejected_currency"] += 1
             p = parse_item(it)
             if p:
                 parsed += 1
+                health["parsed"] += 1
                 process_listing(state, w, p, market_context=market_context)
         print(f"[scan] {w['id']}: {len(items)} items, {parsed} parsed, "
               f"{len(state['seen']) - seen_before} newly seen, "
@@ -656,6 +699,7 @@ def discovery(state, watches, force=False):
         print(f"[warn] {len(no_comp_watches)} watch(es) have no comps and will "
               f"never card: {', '.join(no_comp_watches)}. Add comps.json entries "
               f"or remove the watches.")
+    state["source_health"] = health
     if successful_scans:
         state["last_discovery_date"] = today
     else:

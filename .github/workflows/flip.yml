@@ -5,6 +5,8 @@ on:
     branches: [main]
   schedule:
     - cron: "*/15 * * * *"
+  repository_dispatch:
+    types: [opshub.flip]
   workflow_dispatch:
     inputs:
       force_discovery:
