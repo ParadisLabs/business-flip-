@@ -23,6 +23,12 @@ class Chain(unittest.TestCase):
     def setUp(self):
         self.sent = []
         self.hub = []
+        # Freeze pricing fixtures: production correctly rejects old comps,
+        # while unit tests should not expire as the calendar advances.
+        fb.load_comps = lambda watch_id: [
+            (float(c["price"]), c.get("source", "?"))
+            for c in COMPS.get(watch_id, {}).get("comps", [])
+        ]
         fb.tg_send = lambda text, buttons=None: self.sent.append((text, buttons))
         fb.hub_emit = lambda kind, did, payload: self.hub.append((kind, did, payload))
         # Pricing/card tests must not depend on the live comps.json freshness
@@ -90,6 +96,31 @@ class Chain(unittest.TestCase):
     def test_parse_item_rejects_missing_price(self):
         self.assertIsNone(fb.parse_item({"posting_url": "u", "title": "x"}))
 
+    def test_ebay_active_context_is_display_only(self):
+        w = next(x for x in WATCHES if x["id"] == "playstation-5-miami")
+        old_id, old_secret = os.environ.get("EBAY_CLIENT_ID"), os.environ.get("EBAY_CLIENT_SECRET")
+        os.environ.pop("EBAY_CLIENT_ID", None)
+        os.environ.pop("EBAY_CLIENT_SECRET", None)
+        try:
+            self.assertIsNone(fb.ebay_active_asking(w))
+        finally:
+            if old_id is not None: os.environ["EBAY_CLIENT_ID"] = old_id
+            if old_secret is not None: os.environ["EBAY_CLIENT_SECRET"] = old_secret
+        comps = fb.load_comps
+        fb.load_comps = lambda _: [(100.0, "verified_sold"), (110.0, "verified_sold"), (120.0, "verified_sold")]
+        try:
+            result = fb.price_deal(w, 50.0, "PlayStation 5 Disc Console")
+            self.assertEqual(result["low"], 100.0)
+            self.assertNotIn("ebay_active", result)
+        finally:
+            fb.load_comps = comps
+
+    def test_title_identity_rejects_adjacent_console_and_game_bundle(self):
+        w = next(x for x in WATCHES if x["id"] == "playstation-5-miami")
+        self.assertFalse(fb.title_matches_watch(w, "PlayStation 3 with controllers"))
+        self.assertFalse(fb.title_matches_watch(w, "PlayStation 5 Game Bundle (8 Games)"))
+        self.assertTrue(fb.title_matches_watch(w, "PlayStation 5 Disc Console"))
+
     def test_load_comps_requires_fresh_completed_sales(self):
         today = datetime.now(timezone.utc).date()
         fixture = {
@@ -136,6 +167,15 @@ class Chain(unittest.TestCase):
         self.assertEqual(pr["tier"], "PASS")
         self.assertIn("parts only", pr["flags"])
 
+    def test_real_loader_excludes_non_sale_prices(self):
+        old_stale = fb.STALE_DAYS
+        fb.STALE_DAYS = 1000
+        try:
+            self.assertEqual(REAL_LOAD_COMPS("playstation-5-miami"), [])
+            self.assertEqual(len(REAL_LOAD_COMPS("macbook-air-m1-miami")), 3)
+        finally:
+            fb.STALE_DAYS = old_stale
+
     def test_watch_without_comps_never_cards(self):
         pr = fb.price_deal({"id": "no-such-watch"}, 50.0, "thing")
         self.assertIsNone(pr)
@@ -160,6 +200,62 @@ class Chain(unittest.TestCase):
         self.assertEqual(len(self.sent), 1, "duplicate listing re-carded")
         self.assertEqual(state["deals"]["listing-abc"]["status"], "contacted")
 
+    def test_previously_unpriced_listing_is_rechecked_when_comps_return(self):
+        w = next(x for x in WATCHES if x["id"] == "playstation-5-miami")
+        low = min(c["price"] for c in COMPS["playstation-5-miami"]["comps"])
+        state = {"seen": {"recover": {"w": w["id"], "p": low * .55,
+                                      "t": 1, "card": False, "nocomp": True}},
+                 "deals": {}, "usage": {"month": "2026-10", "fetched": 0}}
+        p = {"id": "recover", "title": "PlayStation 5 Disc Console",
+             "price": round(low * .55, 2), "url": "u", "city": "Miami"}
+        fb.process_listing(state, w, p)
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn("recover", state["deals"])
+        self.assertFalse(state["seen"]["recover"].get("nocomp", True))
+
+    def test_telegram_offset_is_sent_to_get_updates(self):
+        old_token = os.environ.get("FLIP_TG_TOKEN")
+        os.environ["FLIP_TG_TOKEN"] = "test-token"
+        calls = []
+        original = fb.http_json
+        fb.http_json = lambda url, **kwargs: (calls.append(url) or {"result": []})
+        try:
+            fb.tg_get_updates(12345)
+        finally:
+            fb.http_json = original
+            if old_token is None:
+                os.environ.pop("FLIP_TG_TOKEN", None)
+            else:
+                os.environ["FLIP_TG_TOKEN"] = old_token
+        self.assertIn("offset=12345", calls[0])
+
+    def test_failed_scan_does_not_close_daily_retry_gate(self):
+        state = {"last_discovery_date": None,
+                 "usage": {"month": None, "fetched": 0, "warned": False, "blocked": False},
+                 "seen": {}, "deals": {}}
+        original = fb.apify_search
+        fb.apify_search = lambda watch, cap: None
+        try:
+            fb.discovery(state, [{"id": "w", "query": "item", "city": "miami",
+                                  "results_cap": 8}], force=True)
+        finally:
+            fb.apify_search = original
+        self.assertIsNone(state["last_discovery_date"])
+
+    def test_scan_clamps_actor_result_request_to_remaining_budget(self):
+        state = {"last_discovery_date": None,
+                 "usage": {"month": "2026-11", "fetched": 798, "warned": False, "blocked": False},
+                 "seen": {}, "deals": {}}
+        calls = []
+        original = fb.apify_search
+        fb.apify_search = lambda watch, cap: (calls.append(cap) or [])
+        try:
+            fb.discovery(state, [{"id": "w", "query": "item", "city": "miami",
+                                  "results_cap": 8}], force=True)
+        finally:
+            fb.apify_search = original
+        self.assertEqual(calls, [2])
+
     def test_over_budget_listing_is_ignored(self):
         w = {"id": "playstation-5-miami", "max_price": 100}
         state = {"seen": {}, "deals": {}, "usage": {"month": "2026-10", "fetched": 0}}
@@ -177,6 +273,53 @@ class Chain(unittest.TestCase):
                                       "url": "u", "city": "Miami"})
         self.assertEqual(self.sent, [], "carded past MAX_ACTIVE")
         self.assertNotIn("new", state["deals"])
+
+
+class NormalizationAndHealth(unittest.TestCase):
+    def test_non_usd_listing_is_rejected(self):
+        item = {"listingUrl": "https://www.facebook.com/marketplace/item/1",
+                "id": "1", "listing_price": {"amount": "300", "currency": "EUR"},
+                "marketplace_listing_title": "PlayStation 5 Disc Console"}
+        self.assertIsNone(fb.parse_item(item))
+
+    def test_recent_usd_listing_keeps_currency(self):
+        item = {"listingUrl": "https://www.facebook.com/marketplace/item/2",
+                "id": "2", "listing_price": {"amount": "300", "currency": "usd"},
+                "marketplace_listing_title": "PlayStation 5 Disc Console"}
+        parsed = fb.parse_item(item)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed["currency"], "USD")
+
+    def test_stale_and_negative_listings_are_rejected(self):
+        import time as _time
+        base = {"listingUrl": "https://www.facebook.com/marketplace/item/3",
+                "id": "3", "listing_price": {"amount": "100", "currency": "USD"},
+                "marketplace_listing_title": "PlayStation 5 Disc Console"}
+        old = dict(base, creation_time=int(_time.time()) - 31 * 86400)
+        self.assertIsNone(fb.parse_item(old))
+        recent = dict(base, creation_time=int(_time.time()) - 86400)
+        self.assertIsNotNone(fb.parse_item(recent))
+        self.assertIsNone(fb.parse_item(dict(base, listing_price={"amount": "-1"})))
+        self.assertIsNone(fb.parse_item(dict(base, listing_price={"amount": "0"})))
+
+    def test_source_health_distinguishes_failure_from_zero_results(self):
+        state = {"last_discovery_date": None,
+                 "usage": {"month": None, "fetched": 0, "warned": False, "blocked": False},
+                 "seen": {}, "deals": {}}
+        original = fb.apify_search
+        answers = iter([None, []])
+        fb.apify_search = lambda watch, cap: next(answers)
+        try:
+            fb.discovery(state, [
+                {"id": "a", "query": "item a", "city": "miami", "results_cap": 2},
+                {"id": "b", "query": "item b", "city": "miami", "results_cap": 2},
+            ], force=True)
+        finally:
+            fb.apify_search = original
+        health = state["source_health"]
+        self.assertEqual(health["failed"], 1)
+        self.assertEqual(health["zero_results"], 1)
+        self.assertEqual(health["ok"], 1)
 
 
 if __name__ == "__main__":
