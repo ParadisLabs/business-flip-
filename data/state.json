@@ -2,10 +2,10 @@
  "_about": "Engine-owned memory. Committed back after every run. Never hand-edit except full reset: paste this original skeleton to start clean.",
  "version": 1,
  "tg_offset": 275565130,
- "last_discovery_date": "2026-11-09",
+ "last_discovery_date": "2026-11-10",
  "usage": {
   "month": "2026-11",
-  "fetched": 168,
+  "fetched": 192,
   "warned": false,
   "blocked": false
  },
@@ -110,7 +110,7 @@
   "1102978312158036": {
    "w": "playstation-5-miami",
    "p": 425.0,
-   "t": 1794185740,
+   "t": 1794272749,
    "card": false,
    "nocomp": true
   },
@@ -137,7 +137,7 @@
   "1099521269635379": {
    "w": "playstation-5-miami",
    "p": 280.0,
-   "t": 1794050039,
+   "t": 1794272749,
    "card": false,
    "nocomp": true
   },
@@ -151,7 +151,7 @@
   "1406009374912747": {
    "w": "playstation-5-miami",
    "p": 200.0,
-   "t": 1794050039,
+   "t": 1794272749,
    "card": false,
    "nocomp": true
   },
@@ -263,14 +263,14 @@
   "1546551260851171": {
    "w": "macbook-air-m1-miami",
    "p": 120.0,
-   "t": 1794185750,
+   "t": 1794272758,
    "card": false,
    "nocomp": true
   },
   "1625901532550109": {
    "w": "macbook-air-m1-miami",
    "p": 250.0,
-   "t": 1794185750,
+   "t": 1794272758,
    "card": false,
    "nocomp": true
   },
@@ -278,6 +278,34 @@
    "w": "xbox-series-x-miami",
    "p": 450.0,
    "t": 1794185757,
+   "card": false,
+   "nocomp": true
+  },
+  "2022564811750340": {
+   "w": "macbook-air-m1-miami",
+   "p": 350.0,
+   "t": 1794272758,
+   "card": false,
+   "nocomp": true
+  },
+  "2167770844137999": {
+   "w": "macbook-air-m1-miami",
+   "p": 280.0,
+   "t": 1794272758,
+   "card": false,
+   "nocomp": true
+  },
+  "989115884149482": {
+   "w": "xbox-series-x-miami",
+   "p": 500.0,
+   "t": 1794272780,
+   "card": false,
+   "nocomp": true
+  },
+  "1037368675990109": {
+   "w": "xbox-series-x-miami",
+   "p": 500.0,
+   "t": 1794272780,
    "card": false,
    "nocomp": true
   }
@@ -357,9 +385,9 @@
   }
  },
  "last_discovery_by_watch": {
-  "playstation-5-miami": "2026-11-09",
-  "macbook-air-m1-miami": "2026-11-09",
-  "xbox-series-x-miami": "2026-11-09"
+  "playstation-5-miami": "2026-11-10",
+  "macbook-air-m1-miami": "2026-11-10",
+  "xbox-series-x-miami": "2026-11-10"
  },
- "last_comp_warning_date": "2026-11-09"
+ "last_comp_warning_date": "2026-11-10"
 }
