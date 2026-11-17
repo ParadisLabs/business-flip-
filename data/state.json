@@ -2,10 +2,10 @@
  "_about": "Engine-owned memory. Committed back after every run. Never hand-edit except full reset: paste this original skeleton to start clean.",
  "version": 1,
  "tg_offset": 275565130,
- "last_discovery_date": "2026-11-16",
+ "last_discovery_date": "2026-11-17",
  "usage": {
   "month": "2026-11",
-  "fetched": 336,
+  "fetched": 360,
   "warned": false,
   "blocked": false
  },
@@ -153,14 +153,14 @@
   "1406009374912747": {
    "w": "playstation-5-miami",
    "p": 200.0,
-   "t": 1794797790,
+   "t": 1794885043,
    "card": false,
    "nocomp": true
   },
   "1440826747876381": {
    "w": "playstation-5-miami",
    "p": 1.0,
-   "t": 1794797790,
+   "t": 1794885043,
    "card": false,
    "nocomp": true
   },
@@ -209,7 +209,7 @@
   "1431688309027989": {
    "w": "xbox-series-x-miami",
    "p": 400.0,
-   "t": 1794797804,
+   "t": 1794885057,
    "card": false,
    "nocomp": true
   },
@@ -237,7 +237,7 @@
   "1485647646708553": {
    "w": "macbook-air-m1-miami",
    "p": 300.0,
-   "t": 1794620900,
+   "t": 1794885049,
    "card": false,
    "nocomp": true
   },
@@ -251,7 +251,7 @@
   "1268431538523005": {
    "w": "xbox-series-x-miami",
    "p": 350.0,
-   "t": 1794797804,
+   "t": 1794885057,
    "card": false,
    "nocomp": true
   },
@@ -279,7 +279,7 @@
   "3547179388779062": {
    "w": "xbox-series-x-miami",
    "p": 450.0,
-   "t": 1794530325,
+   "t": 1794885057,
    "card": false,
    "nocomp": true
   },
@@ -314,14 +314,14 @@
   "973017752526252": {
    "w": "playstation-5-miami",
    "p": 400.0,
-   "t": 1794797790,
+   "t": 1794885043,
    "card": false,
    "nocomp": true
   },
   "1606876384576627": {
    "w": "macbook-air-m1-miami",
    "p": 350.0,
-   "t": 1794797797,
+   "t": 1794885049,
    "card": false,
    "nocomp": true
   },
@@ -412,7 +412,7 @@
   "1113388661098739": {
    "w": "playstation-5-miami",
    "p": 175.0,
-   "t": 1794717002,
+   "t": 1794885043,
    "card": false,
    "nocomp": true
   },
@@ -468,7 +468,56 @@
   "3441651152704038": {
    "w": "macbook-air-m1-miami",
    "p": 150.0,
-   "t": 1794797797,
+   "t": 1794885049,
+   "card": false,
+   "nocomp": true
+  },
+  "1176893578013135": {
+   "w": "playstation-5-miami",
+   "p": 300.0,
+   "t": 1794885043,
+   "card": false,
+   "nocomp": true
+  },
+  "895705950288933": {
+   "w": "playstation-5-miami",
+   "p": 150.0,
+   "t": 1794885043,
+   "card": false,
+   "nocomp": true
+  },
+  "1164314509880754": {
+   "w": "macbook-air-m1-miami",
+   "p": 100.0,
+   "t": 1794885049,
+   "card": false,
+   "nocomp": true
+  },
+  "997604166138840": {
+   "w": "macbook-air-m1-miami",
+   "p": 350.0,
+   "t": 1794885049,
+   "card": false,
+   "nocomp": true
+  },
+  "1291222519847484": {
+   "w": "macbook-air-m1-miami",
+   "p": 200.0,
+   "t": 1794885049,
+   "card": false,
+   "nocomp": true
+  },
+  "1110599411441870": {
+   "w": "macbook-air-m1-miami",
+   "p": 250.0,
+   "t": 1794885049,
+   "card": false,
+   "nocomp": true
+  },
+  "1161997496182640": {
+   "w": "xbox-series-x-miami",
+   "p": 225.0,
+   "t": 1794885057,
    "card": false,
    "nocomp": true
   }
@@ -548,9 +597,9 @@
   }
  },
  "last_discovery_by_watch": {
-  "playstation-5-miami": "2026-11-16",
-  "macbook-air-m1-miami": "2026-11-16",
-  "xbox-series-x-miami": "2026-11-16"
+  "playstation-5-miami": "2026-11-17",
+  "macbook-air-m1-miami": "2026-11-17",
+  "xbox-series-x-miami": "2026-11-17"
  },
- "last_comp_warning_date": "2026-11-16"
+ "last_comp_warning_date": "2026-11-17"
 }
