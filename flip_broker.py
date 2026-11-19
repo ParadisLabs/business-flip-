@@ -12,7 +12,7 @@ fallback when the hub is unreachable or has no watches.
 You never buy: lock the seller, advertise, find the buyer, collect the fee.
 Stdlib only. Runs free on GitHub Actions.
 """
-import os, re, json, time, hmac, hashlib, math, urllib.request, urllib.error, urllib.parse
+import os, re, json, time, hmac, hashlib, math, base64, statistics, urllib.request, urllib.error, urllib.parse
 from datetime import datetime, timezone
 
 # ---------------- paths & constants ----------------
@@ -35,6 +35,8 @@ FEE_PCT = 0.35             # your fee as a share of expected spread
 FEE_MIN, FEE_MAX = 50.0, 1500.0
 LIST_DISCOUNT = 0.05       # list just under the lowest comp to move fast
 STALE_DAYS = 30            # comps older than this are ignored
+STALE_LISTING_DAYS = 30    # stale marketplace listings are not cards
+SUPPORTED_CURRENCIES = {"USD"}
 MAX_ACTIVE = 5             # don't chase more deals than this at once
 try:                        # verification knob; unset in normal operation
     MAX_ACTIVE = int(os.environ.get("FLIP_MAX_ACTIVE", "") or MAX_ACTIVE)
@@ -96,7 +98,11 @@ def tg_get_updates(offset):
     if not tok:
         return []
     try:
+        # Telegram confirms all updates below the supplied offset. Persisted
+        # state therefore prevents old callbacks/messages from filling the queue.
         url = TG_API.format(tok, "getUpdates") + "?timeout=0"
+        if int(offset or 0) > 0:
+            url += "&offset=" + str(int(offset))
         resp = http_json(url, headers=UA)
     except Exception as e:
         print("[tg] getUpdates failed:", e)
@@ -201,6 +207,26 @@ def risk_flags(title):
     t = (title or "").lower()
     return [w for w in RISK_WORDS if w in t]
 
+def title_matches_watch(watch, title):
+    """Conservative identity check: reject obvious adjacent models/accessories."""
+    t = re.sub(r"[^a-z0-9]+", " ", (title or "").lower()).strip()
+    q = (watch.get("query") or "").lower()
+    if "playstation 5" in q or "ps5" in q:
+        return (bool(re.search(r"\b(?:ps5|playstation 5)\b", t))
+                and not re.search(r"\b(?:ps3|playstation 3|ps4|playstation 4)\b", t)
+                and not (re.search(r"\bgames?\b", t)
+                         and not re.search(r"\b(?:console|system|disc edition|digital edition)\b", t)))
+    if "xbox series x" in q:
+        return (bool(re.search(r"\bxbox series x\b", t))
+                and not re.search(r"\bxbox series s\b", t)
+                and not (re.search(r"\bgames?\b", t)
+                         and not re.search(r"\b(?:console|system)\b", t)))
+    if "macbook air m1" in q:
+        return bool(re.search(r"\bmacbook air\b", t) and re.search(r"\bm1\b", t))
+    # Generic watch: require all meaningful query terms to be present.
+    terms = [x for x in re.findall(r"[a-z0-9]+", q) if len(x) > 1]
+    return bool(terms) and all(x in t for x in terms)
+
 def price_deal(watch, asking, title):
     """REAL comps only -> honest broker math. Never guesses prices."""
     comps = load_comps(watch["id"])
@@ -225,6 +251,77 @@ def price_deal(watch, asking, title):
             "fee": round(fee, 2), "margin": round(margin, 3),
             "tier": tier, "flags": flags}
 
+# ---------------- optional eBay active-market context ----------------
+_EBAY_TOKEN = None
+_EBAY_TOKEN_EXPIRES = 0
+
+def ebay_active_asking(watch, limit=10):
+    """Return active eBay asking-price context only; never feeds sold-comp scoring.
+
+    Disabled unless both application credentials are configured. eBay Browse
+    API access is optional and its availability/rate limits are controlled by eBay.
+    """
+    global _EBAY_TOKEN, _EBAY_TOKEN_EXPIRES
+    app_id = os.environ.get("EBAY_CLIENT_ID", "").strip()
+    cert_id = os.environ.get("EBAY_CLIENT_SECRET", "").strip()
+    if not app_id or not cert_id:
+        return None
+    try:
+        now = time.time()
+        if not _EBAY_TOKEN or now >= _EBAY_TOKEN_EXPIRES - 60:
+            basic = base64.b64encode(f"{app_id}:{cert_id}".encode()).decode()
+            body = urllib.parse.urlencode({
+                "grant_type": "client_credentials",
+                "scope": "https://api.ebay.com/oauth/api_scope",
+            }).encode()
+            req = urllib.request.Request(
+                "https://api.ebay.com/identity/v1/oauth2/token",
+                data=body,
+                headers={"Authorization": "Basic " + basic,
+                         "Content-Type": "application/x-www-form-urlencoded",
+                         "Accept": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=20) as response:
+                token_data = json.loads(response.read().decode())
+            _EBAY_TOKEN = token_data["access_token"]
+            _EBAY_TOKEN_EXPIRES = now + int(token_data.get("expires_in", 7200))
+        marketplace = os.environ.get("EBAY_MARKETPLACE_ID", "EBAY_US").strip() or "EBAY_US"
+        currency = os.environ.get("EBAY_CURRENCY", "USD").strip().upper() or "USD"
+        query = urllib.parse.urlencode({"q": watch.get("query", ""), "limit": int(limit),
+                                        "filter": "buyingOptions:{FIXED_PRICE}"})
+        url = "https://api.ebay.com/buy/browse/v1/item_summary/search?" + query
+        req = urllib.request.Request(url, headers={
+            "Authorization": "Bearer " + _EBAY_TOKEN,
+            "Accept": "application/json",
+            "X-EBAY-C-MARKETPLACE-ID": marketplace,
+        })
+        with urllib.request.urlopen(req, timeout=20) as response:
+            payload = json.loads(response.read().decode())
+        prices = []
+        for item in (payload.get("itemSummaries") or []):
+            if not isinstance(item, dict) or not title_matches_watch(watch, item.get("title", "")):
+                continue
+            price = item.get("price") or {}
+            if str(price.get("currency", "")).upper() != currency:
+                continue
+            try:
+                value = float(price.get("value"))
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                prices.append(value)
+        if not prices:
+            return None
+        prices.sort()
+        return {"count": len(prices), "min": round(prices[0], 2),
+                "median": round(statistics.median(prices), 2),
+                "currency": currency, "marketplace": marketplace,
+                "source": "eBay Browse active listings (asking only)"}
+    except Exception as e:
+        print(f"[ebay] active asking context unavailable for {watch.get('id')}: {e}")
+        return None
+
+
 # ---------------- cards ----------------
 def seller_draft(title):
     return ('Hi! Is the ' + title + ' still available? I connect sellers with '
@@ -236,8 +333,8 @@ def deal_card(watch, it, pr, tag=""):
     icon = "🔥" if pr["tier"] == "DEAL" else "🟡"
     lines = [
         f"{icon} {pr['tier']} — {it['title'][:60]} {tag}".rstrip(),
-        f"Asking ${it['price']:,.0f} | Comps low ${pr['low']:,.0f} "
-        f"({pr['n']} comps: {pr['src']})",
+        f"Asking ${it['price']:,.0f} | Sold comps low ${pr['low']:,.0f} "
+        f"({pr['n']} sold comps: {pr['src']})",
         f"MAX OFFER to seller: ${pr['max_offer']:,.0f}",
         f"Suggested list price: ${pr['est_list']:,.0f}",
         f"EST. spread ${pr['spread']:,.0f} ({pr['margin']*100:.0f}%) | "
@@ -249,6 +346,11 @@ def deal_card(watch, it, pr, tag=""):
     ]
     if pr["flags"]:
         lines.insert(1, "⚠️ Risk: " + ", ".join(pr["flags"]))
+    ebay = pr.get("ebay_active")
+    if ebay:
+        lines.insert(2, f"eBay active asking only: min ${ebay['min']:,.0f} / "
+                    f"median ${ebay['median']:,.0f} ({ebay['count']} matches; "
+                    "NOT sold comps)")
     return "\n".join(lines)
 
 def deal_buttons(did):
@@ -365,8 +467,11 @@ def handle_command(state, msg):
         act = [d for d in state["deals"].values()
                if d["status"] not in ("won", "lost")]
         u = state["usage"]
+        h = state.get("source_health") or {}
         lines = [f"🤝 Flip Broker — {len(act)} active / {len(state['deals'])} total",
-                 f"Apify this month: {u['fetched']}/{int(MONTHLY_CAP)}"]
+                 f"Apify this month: {u['fetched']}/{int(MONTHLY_CAP)}",
+                 f"Source: {h.get('ok', 0)} ok · {h.get('zero_results', 0)} zero · "
+                 f"{h.get('failed', 0)} failed · {h.get('rejected_currency', 0)} non-USD"]
         for d in act[:8]:
             lines.append(f"• {d['title'][:32]} — {d['status']} (${d.get('asking', 0):,.0f})")
         tg_send("\n".join(lines))
@@ -420,7 +525,15 @@ def parse_item(it):
         return None
     if it.get("is_sold") or it.get("is_pending") or it.get("is_hidden"):
         return None
-    price = it.get("listing_price")
+    raw_price = it.get("listing_price")
+    currency = "USD"
+    if isinstance(raw_price, dict):
+        currency = str(raw_price.get("currency") or "USD").upper()
+    elif it.get("currency"):
+        currency = str(it.get("currency")).upper()
+    if currency not in SUPPORTED_CURRENCIES:
+        return None
+    price = raw_price
     if isinstance(price, dict):
         price = price.get("amount", price.get("price"))
     if price is None:
@@ -428,10 +541,11 @@ def parse_item(it):
     if price is None:
         price = it.get("min_listing_price") or it.get("strikethrough_price")
     if isinstance(price, str):
-        m = re.search(r"[\d,]+(?:\.\d+)?", price)
-        if not m:
+        cleaned = re.sub(r"[^0-9.\-]", "", price)
+        try:
+            price = float(cleaned)
+        except ValueError:
             return None
-        price = float(m.group().replace(",", ""))
     try:
         price = float(price)
     except (TypeError, ValueError):
@@ -446,15 +560,34 @@ def parse_item(it):
     city = ""
     if isinstance(loc, dict):
         city = loc.get("city") or (loc.get("reverse_geocode") or {}).get("city") or ""
+    listed_at = None
+    for key in ("creation_time", "creationTime", "listed_at", "listedAt"):
+        if it.get(key) is not None:
+            try:
+                value = float(it[key])
+                listed_at = int(value / 1000) if value > 10_000_000_000 else int(value)
+            except (TypeError, ValueError):
+                pass
+            break
+    if listed_at and int(time.time()) - listed_at > STALE_LISTING_DAYS * 86400:
+        return None
     return {"id": did, "title": title or "Untitled listing", "price": price,
-            "url": url.split("?")[0], "city": city}
+            "url": url.split("?")[0], "city": city, "currency": currency,
+            "listed_at": listed_at}
 
-def process_listing(state, w, p):
+def process_listing(state, w, p, market_context=None):
+    if p.get("currency", "USD") not in SUPPORTED_CURRENCIES:
+        return
+    if p.get("listed_at") and int(time.time()) - int(p["listed_at"]) > STALE_LISTING_DAYS * 86400:
+        return
     if p["id"] in state["deals"]:
         return  # known deal — never re-card or reset its status
     seen = state["seen"]
     old = seen.get(p["id"])
     if p["price"] > float(w.get("max_price", 10**9)):
+        return
+    if not title_matches_watch(w, p["title"]):
+        print(f"[identity] rejected listing for {w['id']}: {p['title'][:80]}")
         return
     pr = price_deal(w, p["price"], p["title"])
     if pr is None:
@@ -462,8 +595,11 @@ def process_listing(state, w, p):
         seen[p["id"]] = {"w": w["id"], "p": p["price"],
                          "t": int(time.time()), "card": False, "nocomp": True}
         return
+    if market_context:
+        pr["ebay_active"] = market_context
     tag = ""
-    if old:
+    recovered_from_missing_comps = bool(old and old.get("nocomp"))
+    if old and not recovered_from_missing_comps:
         dropped = old["p"] > 0 and p["price"] <= old["p"] * 0.9
         if not dropped or old.get("card") or pr["tier"] == "PASS":
             return
@@ -471,13 +607,16 @@ def process_listing(state, w, p):
     else:
         if pr["tier"] == "PASS":
             seen[p["id"]] = {"w": w["id"], "p": p["price"],
-                             "t": int(time.time()), "card": False}
+                             "t": int(time.time()), "card": False, "nocomp": False}
             return
         active = sum(1 for d in state["deals"].values()
                      if d["status"] not in ("won", "lost"))
         if active >= MAX_ACTIVE:
             return
-    seen[p["id"]] = {"w": w["id"], "p": p["price"], "t": int(time.time()), "card": True}
+        if recovered_from_missing_comps:
+            tag = "📊 COMPS RESTORED"
+    seen[p["id"]] = {"w": w["id"], "p": p["price"], "t": int(time.time()),
+                     "card": True, "nocomp": False}
     state["deals"][p["id"]] = {"watch": w["id"], "title": p["title"],
                                "asking": p["price"], "status": "found",
                                "opened_ts": int(time.time()),
@@ -520,36 +659,53 @@ def discovery(state, watches, force=False):
         print(warning)
         if state.get("last_comp_warning_date") != today:
             tg_send("⚠️ Flip Broker: some active watches have no fresh completed-sale comps, "
-                    "so listings will be skipped rather than priced with stale or asking-only data.\\n"
+                    "so listings will be skipped rather than priced with stale or asking-only data.\n"
                     + ", ".join(no_comp_watches)
-                    + "\\nRefresh comps.json with at least 3 recent comparable completed sales per watch.")
+                    + "\nRefresh comps.json with at least 3 recent comparable completed sales per watch.")
             state["last_comp_warning_date"] = today
-    attempted = 0
-    succeeded = 0
+    health = {"scanned_at": int(time.time()), "watches": len(watches), "ok": 0,
+              "failed": 0, "zero_results": 0, "parsed": 0,
+              "rejected_currency": 0, "stale": 0}
+    successful_scans = 0
     for w in watches:
         wid = str(w.get("id") or "")
         if not force and by_watch.get(wid) == today:
             print(f"[scan] {wid}: already scanned today — skipping")
             continue
-        if u["fetched"] >= MONTHLY_CAP:
+        remaining = int(MONTHLY_CAP - u["fetched"])
+        if remaining <= 0:
             tg_send("🛑 Apify cap reached mid-scan — remaining watches skipped.")
             break
-        attempted += 1
-        items = apify_search(w, w.get("results_cap", 8))
+        requested = max(0, min(int(w.get("results_cap", HUB_RESULTS_CAP)), remaining))
+        if requested <= 0:
+            break
+        items = apify_search(w, requested)
         if items is None:
+            health["failed"] += 1
             print(f"[scan] {wid}: provider failed — will retry on the next scheduled poll")
             continue
-        # An empty list is a successful scan; None means the provider failed.
         by_watch[wid] = today
-        succeeded += 1
+        successful_scans += 1
+        health["ok"] += 1
+        if not items:
+            health["zero_results"] += 1
+        # One optional eBay Browse request per watch scan. Active asking prices
+        # are display-only and cannot affect price_deal(), which uses sold comps.
+        market_context = ebay_active_asking(w)
         u["fetched"] += len(items)
         seen_before = len(state["seen"])
         parsed = 0
         for it in items:
+            if isinstance(it, dict):
+                raw = it.get("listing_price")
+                cur = (raw.get("currency") if isinstance(raw, dict) else it.get("currency")) or "USD"
+                if str(cur).upper() not in SUPPORTED_CURRENCIES:
+                    health["rejected_currency"] += 1
             p = parse_item(it)
             if p:
                 parsed += 1
-                process_listing(state, w, p)
+                health["parsed"] += 1
+                process_listing(state, w, p, market_context=market_context)
         print(f"[scan] {w['id']}: {len(items)} items, {parsed} parsed, "
               f"{len(state['seen']) - seen_before} newly seen, "
               f"{len(state['deals'])} deals tracked")
@@ -576,13 +732,14 @@ def discovery(state, watches, force=False):
                     + ", ".join(no_comp_watches)
                     + "\nRefresh comps.json with at least 3 recent comparable prices per watch.")
             state["last_comp_warning_date"] = today
+    state["source_health"] = health
     # Only close the daily discovery window when every configured watch
     # has a successful result for today. Failed watches remain retryable.
     if all(by_watch.get(str(w.get("id") or "")) == today for w in watches):
         state["last_discovery_date"] = today
     else:
         state["last_discovery_date"] = None
-    print(f"[scan] completed {succeeded}/{attempted} attempted watches; "
+    print(f"[scan] completed {successful_scans}/{len(watches)} successful watches; "
           f"{sum(1 for w in watches if by_watch.get(str(w.get('id') or '')) == today)}/{len(watches)} "
           "watches successful today")
 
